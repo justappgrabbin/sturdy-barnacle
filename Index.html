@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Morph OS — Visual Editor</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+:root{--bg:#07070d;--bg-panel:#0f0f1a;--bg-card:#151525;--bg-hover:#1e1e35;--accent:#00d4aa;--accent2:#7c3aed;--accent3:#f0abfc;--danger:#ef4444;--text:#e2e8f0;--text-dim:#64748b;--border:#1e293b;--mir:#a855f7;--edit:#fbbf24;}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;touch-action:manipulation;}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden;font-size:13px;}
+
+/* EDIT MODE STYLES */
+body.edit-mode .editable{outline:1px dashed var(--edit);cursor:text;position:relative;}
+body.edit-mode .editable:hover{outline:2px solid var(--edit);background:rgba(251,191,36,0.05);}
+body.edit-mode .editable:focus{outline:2px solid var(--accent);background:rgba(0,212,170,0.08);}
+body.edit-mode .editable::after{content:'✏️';position:absolute;top:-8px;right:-8px;font-size:10px;background:var(--edit);color:#000;border-radius:50%;width:16px;height:16px;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity 0.2s;pointer-events:none;}
+body.edit-mode .editable:hover::after{opacity:1;}
+body.edit-mode .draggable{cursor:grab;}
+body.edit-mode .draggable:active{cursor:grabbing;}
+body.edit-mode .panel{position:relative;}
+body.edit-mode .panel::before{content:'📦';position:absolute;top:4px;right:4px;font-size:10px;opacity:0.3;pointer-events:none;}
+
+/* BASE STYLES */
+.header{position:sticky;top:0;z-index:100;background:rgba(7,7,13,0.95);backdrop-filter:blur(20px);border-bottom:1px solid var(--border);padding:10px 14px;display:flex;align-items:center;justify-content:space-between;}
+.logo{display:flex;align-items:center;gap:8px;font-weight:700;font-size:1rem;color:var(--accent);}
+.logo-icon{width:32px;height:32px;background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:1rem;box-shadow:0 0 12px rgba(0,212,170,0.3);}
+.header-actions{display:flex;gap:6px;}
+.btn{padding:8px 12px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);border-radius:8px;cursor:pointer;font-size:0.75rem;transition:all 0.2s;display:flex;align-items:center;gap:5px;}
+.btn:hover{background:var(--bg-hover);border-color:var(--accent);}
+.btn-primary{background:linear-gradient(135deg,var(--accent),var(--accent2));border:none;color:#000;font-weight:700;box-shadow:0 0 12px rgba(0,212,170,0.25);}
+.btn-mir{background:linear-gradient(135deg,var(--mir),var(--accent2));border:none;color:#fff;font-weight:600;box-shadow:0 0 12px rgba(168,85,247,0.25);}
+.btn-edit{background:linear-gradient(135deg,var(--edit),#f59e0b);border:none;color:#000;font-weight:700;box-shadow:0 0 12px rgba(251,191,36,0.25);}
+.btn-edit.active{background:linear-gradient(135deg,#f59e0b,var(--edit));box-shadow:0 0 16px rgba(251,191,36,0.4);}
+.main-container{padding:12px;max-width:100%;}
+.panel{background:var(--bg-panel);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px;}
+.panel-title{font-size:0.7rem;text-transform:uppercase;letter-spacing:1px;color:var(--text-dim);margin-bottom:10px;display:flex;align-items:center;gap:5px;font-weight:600;}
+.drop-zone{border:2px dashed var(--border);border-radius:12px;padding:24px 16px;text-align:center;transition:all 0.3s;cursor:pointer;background:rgba(0,212,170,0.03);position:relative;overflow:hidden;}
+.drop-zone::before{content:'';position:absolute;inset:0;background:radial-gradient(circle at center,rgba(0,212,170,0.1),transparent 70%);opacity:0;transition:opacity 0.3s;}
+.drop-zone:hover::before,.drop-zone.dragover::before{opacity:1;}
+.drop-zone.dragover{border-color:var(--accent);background:rgba(0,212,170,0.06);transform:scale(1.01);}
+.drop-zone .icon{font-size:2.2rem;margin-bottom:8px;opacity:0.7;position:relative;z-index:1;}
+.drop-zone p{color:var(--text-dim);font-size:0.85rem;margin-bottom:4px;position:relative;z-index:1;}
+.drop-zone .hint{font-size:0.65rem;color:var(--text-dim);opacity:0.5;position:relative;z-index:1;}
+.paste-area{width:100%;min-height:100px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:0.75rem;resize:vertical;margin-top:8px;line-height:1.5;}
+.paste-area:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px rgba(0,212,170,0.15);}
+.file-list{display:flex;flex-direction:column;gap:4px;max-height:220px;overflow-y:auto;}
+.file-item{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--bg-card);border-radius:6px;border:1px solid transparent;transition:all 0.2s;cursor:pointer;}
+.file-item:hover{border-color:var(--accent);background:var(--bg-hover);}
+.file-item .file-icon{width:28px;height:28px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:0.85rem;flex-shrink:0;}
+.file-item .file-info{flex:1;min-width:0;}
+.file-item .file-name{font-size:0.78rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text);}
+.file-item .file-meta{font-size:0.6rem;color:var(--text-dim);margin-top:1px;}
+.file-item .file-status{font-size:0.6rem;padding:2px 6px;border-radius:4px;background:var(--bg);font-weight:600;}
+.status-parsed{color:var(--accent);}
+.status-mir{color:var(--mir);}
+.stats-bar{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px;}
+.stat-card{background:var(--bg-panel);border:1px solid var(--border);border-radius:10px;padding:12px 6px;text-align:center;position:relative;overflow:hidden;}
+.stat-card::after{content:'';position:absolute;bottom:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--accent),var(--accent2));opacity:0.3;}
+.stat-card .stat-value{font-size:1.3rem;font-weight:800;color:var(--accent);font-family:'JetBrains Mono',monospace;}
+.stat-card .stat-value.mir{color:var(--mir);}
+.stat-card .stat-value.danger{color:var(--danger);}
+.stat-card .stat-label{font-size:0.6rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;margin-top:3px;font-weight:600;}
+.tabs{display:flex;gap:3px;background:var(--bg-panel);padding:3px;border-radius:10px;border:1px solid var(--border);overflow-x:auto;margin-bottom:12px;scrollbar-width:none;}
+.tabs::-webkit-scrollbar{display:none;}
+.tab{padding:8px 12px;border-radius:8px;cursor:pointer;font-size:0.75rem;white-space:nowrap;transition:all 0.2s;border:none;background:transparent;color:var(--text-dim);font-weight:500;}
+.tab.active{background:var(--bg-card);color:var(--accent);font-weight:700;box-shadow:0 2px 8px rgba(0,0,0,0.3);}
+.tab-content{display:none;}
+.tab-content.active{display:block;animation:fadeIn 0.25s ease;}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
+.os-canvas{background:var(--bg-panel);border:1px solid var(--border);border-radius:12px;min-height:280px;padding:14px;}
+.os-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+.os-app{background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:14px 8px;text-align:center;cursor:pointer;transition:all 0.25s;position:relative;overflow:hidden;}
+.os-app::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--accent),var(--accent2));opacity:0;transition:opacity 0.25s;}
+.os-app:hover::before,.os-app:active::before{opacity:1;}
+.os-app:hover,.os-app:active{transform:translateY(-3px);border-color:var(--accent);box-shadow:0 8px 24px rgba(0,212,170,0.12);}
+.os-app .app-icon{width:40px;height:40px;margin:0 auto 8px;background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.2rem;box-shadow:0 4px 12px rgba(0,212,170,0.2);}
+.os-app .app-name{font-size:0.75rem;font-weight:700;margin-bottom:2px;color:var(--text);}
+.os-app .app-desc{font-size:0.6rem;color:var(--text-dim);}
+.function-map{display:flex;flex-direction:column;gap:6px;}
+.function-node{background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:12px;display:flex;align-items:center;gap:10px;transition:all 0.2s;}
+.function-node:hover{border-color:var(--accent);transform:translateX(3px);background:var(--bg-hover);}
+.function-node .fn-icon{width:36px;height:36px;border-radius:8px;background:linear-gradient(135deg,var(--accent2),var(--mir));display:flex;align-items:center;justify-content:center;font-size:1rem;flex-shrink:0;box-shadow:0 2px 8px rgba(124,58,237,0.2);}
+.function-node .fn-info{flex:1;}
+.function-node .fn-name{font-weight:700;font-size:0.82rem;color:var(--text);letter-spacing:0.2px;}
+.function-node .fn-source{font-size:0.62rem;color:var(--text-dim);margin-top:2px;font-family:'JetBrains Mono',monospace;}
+.function-node .fn-tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:5px;}
+.tag{font-size:0.6rem;padding:2px 8px;border-radius:4px;background:rgba(100,116,139,0.15);color:var(--text-dim);border:1px solid rgba(100,116,139,0.2);font-weight:500;}
+.tag.accent{background:rgba(0,212,170,0.12);color:var(--accent);border-color:rgba(0,212,170,0.25);}
+.tag.mir{background:rgba(168,85,247,0.12);color:var(--mir);border-color:rgba(168,85,247,0.25);}
+.gap-suggestions{display:flex;flex-direction:column;gap:8px;}
+.gap-card{background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:14px;border-left:3px solid var(--accent3);}
+.gap-card .gap-type{font-size:0.65rem;text-transform:uppercase;letter-spacing:1px;color:var(--accent3);margin-bottom:6px;font-weight:700;}
+.gap-card .gap-desc{font-size:0.8rem;margin-bottom:10px;color:var(--text);line-height:1.4;}
+.gap-card .gap-solution{font-size:0.75rem;color:var(--text-dim);background:var(--bg);padding:10px;border-radius:6px;line-height:1.4;border:1px solid var(--border);}
+.how-it-works{background:var(--bg-panel);border:1px solid var(--border);border-radius:12px;padding:16px;}
+.step-flow{display:flex;flex-direction:column;gap:0;}
+.step{display:flex;gap:12px;padding:14px 0;position:relative;}
+.step:not(:last-child)::after{content:'';position:absolute;left:18px;top:42px;width:2px;height:calc(100% - 14px);background:linear-gradient(to bottom,var(--accent),var(--accent2));opacity:0.4;}
+.step-number{width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-weight:800;font-size:0.85rem;flex-shrink:0;z-index:2;color:#000;box-shadow:0 2px 8px rgba(0,212,170,0.3);}
+.step-content h4{font-size:0.85rem;margin-bottom:4px;color:var(--text);font-weight:700;}
+.step-content p{font-size:0.75rem;color:var(--text-dim);line-height:1.5;}
+.console{background:#05050a;border:1px solid var(--border);border-radius:8px;padding:10px;font-family:'JetBrains Mono',monospace;font-size:0.65rem;max-height:160px;overflow-y:auto;color:var(--text-dim);}
+.console-line{padding:2px 0;border-bottom:1px solid rgba(30,41,59,0.5);}
+.console-line .timestamp{color:var(--text-dim);opacity:0.6;}
+.console-line .level-info{color:var(--accent);}
+.console-line .level-success{color:var(--accent);font-weight:600;}
+.console-line .level-warn{color:var(--accent3);}
+.console-line .level-error{color:var(--danger);}
+.modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);backdrop-filter:blur(12px);z-index:1000;display:none;align-items:center;justify-content:center;padding:16px;}
+.modal-overlay.active{display:flex;}
+.modal{background:var(--bg-panel);border:1px solid var(--border);border-radius:14px;width:100%;max-width:100%;max-height:92vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 24px 48px rgba(0,0,0,0.5);}
+.modal-header{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;background:var(--bg-card);}
+.modal-header h3{font-size:0.9rem;color:var(--text);font-weight:700;}
+.modal-close{width:32px;height:32px;border-radius:8px;border:none;background:var(--bg);color:var(--text-dim);cursor:pointer;font-size:1.1rem;transition:all 0.2s;}
+.modal-close:hover{background:var(--danger);color:#fff;}
+.modal-body{padding:16px;overflow-y:auto;flex:1;}
+.code-viewer{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;font-family:'JetBrains Mono',monospace;font-size:0.72rem;overflow-x:auto;white-space:pre-wrap;word-break:break-all;max-height:350px;overflow-y:auto;color:var(--text-dim);line-height:1.6;}
+.mir-panel{background:var(--bg-card);border:1px solid rgba(168,85,247,0.3);border-radius:10px;padding:14px;margin-top:10px;position:relative;overflow:hidden;}
+.mir-panel::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,var(--mir),transparent);}
+.mir-panel-title{font-size:0.78rem;color:var(--mir);font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:6px;}
+.regen-mode{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;}
+.regen-btn{padding:6px 12px;border:1px solid var(--border);background:var(--bg);color:var(--text-dim);border-radius:6px;cursor:pointer;font-size:0.72rem;transition:all 0.2s;font-weight:500;}
+.regen-btn:hover{border-color:var(--mir);color:var(--mir);}
+.regen-btn.active{background:var(--mir);color:#fff;border-color:var(--mir);font-weight:700;box-shadow:0 0 12px rgba(168,85,247,0.25);}
+
+/* STYLE EDITOR PANEL */
+.style-editor{position:fixed;bottom:0;left:0;right:0;background:var(--bg-panel);border-top:2px solid var(--edit);padding:12px 16px;z-index:200;transform:translateY(100%);transition:transform 0.3s ease;max-height:200px;overflow-y:auto;}
+.style-editor.active{transform:translateY(0);}
+.style-editor-title{font-size:0.8rem;color:var(--edit);font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:6px;}
+.style-row{display:flex;gap:8px;align-items:center;margin-bottom:6px;}
+.style-row label{font-size:0.7rem;color:var(--text-dim);width:80px;flex-shrink:0;}
+.style-row input,.style-row select{flex:1;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:0.75rem;}
+.style-row input[type="color"]{padding:2px;height:32px;}
+
+/* ADD ELEMENT BUTTONS */
+.add-bar{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;}
+.add-btn{padding:6px 10px;border:1px dashed var(--border);background:transparent;color:var(--text-dim);border-radius:6px;cursor:pointer;font-size:0.7rem;transition:all 0.2s;}
+.add-btn:hover{border-color:var(--accent);color:var(--accent);background:rgba(0,212,170,0.05);}
+
+::-webkit-scrollbar{width:4px;height:4px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+::-webkit-scrollbar-thumb:hover{background:var(--accent);}
+</style>
+</head>
+<body>
+<div class="header" id="pageHeader">
+<div class="logo editable" contenteditable="false" data-edit="text">
+<div class="logo-icon editable" contenteditable="false" data-edit="emoji">🧬</div>
+<span class="editable" contenteditable="false" data-edit="text">Morph OS</span>
+</div>
+<div class="header-actions">
+<button class="btn btn-edit" id="editToggle" onclick="toggleEditMode()">✏️ Edit</button>
+<button class="btn btn-mir" onclick="showMIRPanel()">🔥 MIR</button>
+<button class="btn" onclick="exportMIR()">📦 Export</button>
+<button class="btn btn-primary" onclick="buildOS()">🔨 Build</button>
+</div>
+</div>
+
+<div class="main-container" id="mainContainer">
+<div class="panel editable" contenteditable="false" data-edit="container" id="dropPanel">
+<div class="panel-title editable" contenteditable="false" data-edit="text">📁 Drop Any Files</div>
+<div class="drop-zone editable" contenteditable="false" data-edit="container" id="dropZone">
+<div class="icon editable" contenteditable="false" data-edit="emoji">📦</div>
+<p class="editable" contenteditable="false" data-edit="text">Drop ANY files or ZIPs here</p>
+<span class="hint editable" contenteditable="false" data-edit="text">.tsx .ts .js .py .json .md .png . anything</span>
+</div>
+<input type="file" id="fileInput" multiple style="display:none">
+<div class="add-bar" id="addBar1" style="display:none;">
+<button class="add-btn" onclick="addElement('dropZone','text')">+ Text</button>
+<button class="add-btn" onclick="addElement('dropZone','icon')">+ Icon</button>
+<button class="add-btn" onclick="addElement('dropZone','button')">+ Button</button>
+</div>
+</div>
+
+<div class="panel editable" contenteditable="false" data-edit="container">
+<div class="panel-title editable" contenteditable="false" data-edit="text">📋 Paste Code</div>
+<textarea class="paste-area editable" contenteditable="false" data-edit="code" id="pasteArea" placeholder="Paste TSX/TS/JS/Python/JSON...&#10;MIR learns contract → stores in GNN"></textarea>
+<button class="btn btn-primary editable" contenteditable="false" data-edit="button" style="width:100%;margin-top:8px;justify-content:center;" onclick="parsePastedCode()">🔍 Parse → MIR</button>
+<div class="add-bar" style="display:none;">
+<button class="add-btn" onclick="addElement(this.parentElement.parentElement,'textarea')">+ Textarea</button>
+<button class="add-btn" onclick="addElement(this.parentElement.parentElement,'button')">+ Button</button>
+</div>
+</div>
+
+<div class="stats-bar editable" contenteditable="false" data-edit="container" id="statsBar">
+<div class="stat-card editable" contenteditable="false" data-edit="card">
+<div class="stat-value editable" contenteditable="false" data-edit="number" id="statFiles">0</div>
+<div class="stat-label editable" contenteditable="false" data-edit="text">Files</div>
+</div>
+<div class="stat-card editable" contenteditable="false" data-edit="card">
+<div class="stat-value editable" contenteditable="false" data-edit="number" id="statComponents">0</div>
+<div class="stat-label editable" contenteditable="false" data-edit="text">Components</div>
+</div>
+<div class="stat-card editable" contenteditable="false" data-edit="card">
+<div class="stat-value editable" contenteditable="false" data-edit="number" id="statFunctions">0</div>
+<div class="stat-label editable" contenteditable="false" data-edit="text">Functions</div>
+</div>
+<div class="stat-card editable" contenteditable="false" data-edit="card">
+<div class="stat-value editable mir" contenteditable="false" data-edit="number" id="statMIR">0</div>
+<div class="stat-label editable" contenteditable="false" data-edit="text">MIR</div>
+</div>
+</div>
+
+<div class="tabs editable" contenteditable="false" data-edit="container" id="tabBar">
+<button class="tab active editable" contenteditable="false" data-edit="tab" onclick="switchTab(event,'os')">🖥️ OS</button>
+<button class="tab editable" contenteditable="false" data-edit="tab" onclick="switchTab(event,'components')">⚛️</button>
+<button class="tab editable" contenteditable="false" data-edit="tab" onclick="switchTab(event,'functions')">⚡</button>
+<button class="tab editable" contenteditable="false" data-edit="tab" onclick="switchTab(event,'mir')">🔥</button>
+<button class="tab editable" contenteditable="false" data-edit="tab" onclick="switchTab(event,'gaps')">🔍</button>
+<button class="tab editable" contenteditable="false" data-edit="tab" onclick="switchTab(event,'how')">📖</button>
+</div>
+
+<div class="tab-content active" id="tab-os">
+<div class="os-canvas editable" contenteditable="false" data-edit="container" id="osCanvas">
+<div style="text-align:center;padding:50px 16px;color:var(--text-dim);">
+<div class="editable" contenteditable="false" data-edit="emoji" style="font-size:2.5rem;margin-bottom:12px;">🎯</div>
+<h3 class="editable" contenteditable="false" data-edit="text" style="margin-bottom:6px;color:var(--text);font-size:0.95rem;font-weight:700;">Build Your Morph OS</h3>
+<p class="editable" contenteditable="false" data-edit="text" style="font-size:0.78rem;">Drop any files → MIR learns → GNN stores → OS assembles</p>
+</div>
+</div>
+</div>
+
+<div class="tab-content" id="tab-components">
+<div class="panel" style="padding:0;background:none;border:none;">
+<div class="function-map" id="componentMap">
+<div style="text-align:center;padding:30px;color:var(--text-dim);font-size:0.8rem;">No components yet. Drop .tsx files.</div>
+</div>
+</div>
+</div>
+
+<div class="tab-content" id="tab-functions">
+<div class="panel" style="padding:0;background:none;border:none;">
+<div class="function-map" id="functionMap">
+<div style="text-align:center;padding:30px;color:var(--text-dim);font-size:0.8rem;">No functions yet. Drop code files.</div>
+</div>
+</div>
+</div>
+
+<div class="tab-content" id="tab-mir">
+<div class="panel editable" contenteditable="false" data-edit="container">
+<div class="panel-title editable" contenteditable="false" data-edit="text">🔥 MIR Engine</div>
+<div class="mir-panel editable" contenteditable="false" data-edit="container">
+<div class="mir-panel-title editable" contenteditable="false" data-edit="text">🎯 Regeneration Mode</div>
+<div class="regen-mode editable" contenteditable="false" data-edit="container">
+<button class="regen-btn active editable" contenteditable="false" data-edit="button" onclick="setRegenMode('exact')">Exact</button>
+<button class="regen-btn editable" contenteditable="false" data-edit="button" onclick="setRegenMode('equivalent')">Equivalent</button>
+<button class="regen-btn editable" contenteditable="false" data-edit="button" onclick="setRegenMode('morph_runtime')">Runtime</button>
+<button class="regen-btn editable" contenteditable="false" data-edit="button" onclick="setRegenMode('improved')">Improved</button>
+</div>
+</div>
+<div class="mir-panel editable" contenteditable="false" data-edit="container">
+<div class="mir-panel-title editable" contenteditable="false" data-edit="text">🧠 GNN Memory</div>
+<div id="mirMemoryList" style="font-size:0.75rem;color:var(--text-dim);">
+<div style="padding:3px 0;">No contracts stored yet</div>
+</div>
+</div>
+<div class="mir-panel editable" contenteditable="false" data-edit="container">
+<div class="mir-panel-title editable" contenteditable="false" data-edit="text">📄 Latest Contract</div>
+<div id="mirLatest" style="font-size:0.75rem;color:var(--text-dim);">
+<div>Upload files to see MIR contracts</div>
+</div>
+</div>
+</div>
+</div>
+
+<div class="tab-content" id="tab-gaps">
+<div class="panel" style="padding:0;background:none;border:none;">
+<div class="gap-suggestions" id="gapSuggestions">
+<div class="gap-card editable" contenteditable="false" data-edit="card">
+<div class="gap-type editable" contenteditable="false" data-edit="text">Ready</div>
+<div class="gap-desc editable" contenteditable="false" data-edit="text">Upload files to detect gaps and get suggestions</div>
+<div class="gap-solution editable" contenteditable="false" data-edit="text">💡 Drop any ZIP or code files to start analysis</div>
+</div>
+</div>
+</div>
+</div>
+
+<div class="tab-content" id="tab-how">
+<div class="how-it-works editable" contenteditable="false" data-edit="container">
+<div class="panel-title editable" contenteditable="false" data-edit="text" style="margin-bottom:14px;">📖 How Morph OS Works</div>
+<div class="step-flow" id="stepFlow">
+<div class="step editable" contenteditable="false" data-edit="step">
+<div class="step-number editable" contenteditable="false" data-edit="number">1</div>
+<div class="step-content">
+<h4 class="editable" contenteditable="false" data-edit="text">Ingest Anything</h4>
+<p class="editable" contenteditable="false" data-edit="text">Drop ZIP files, individual files of ANY type, or paste raw code. Accepts .tsx, .ts, .js, .py, .json, .md, images, data files — everything gets ingested.</p>
+</div>
+</div>
+<div class="step editable" contenteditable="false" data-edit="step">
+<div class="step-number editable" contenteditable="false" data-edit="number">2</div>
+<div class="step-content">
+<h4 class="editable" contenteditable="false" data-edit="text">Parse with Babel AST</h4>
+<p class="editable" contenteditable="false" data-edit="text">For code files, Babel parses TSX/TS/JS into an Abstract Syntax Tree. Extracts components, functions, hooks, types, interfaces, enums, imports, exports.</p>
+</div>
+</div>
+<div class="step editable" contenteditable="false" data-edit="step">
+<div class="step-number editable" contenteditable="false" data-edit="number">3</div>
+<div class="step-content">
+<h4 class="editable" contenteditable="false" data-edit="text">Learn MIR Contract</h4>
+<p class="editable" contenteditable="false" data-edit="text">Original file → Learned contract. Captures function signatures, type definitions, export graphs, prop interfaces, hook dependencies. Each contract gets a unique ID.</p>
+</div>
+</div>
+<div class="step editable" contenteditable="false" data-edit="step">
+<div class="step-number editable" contenteditable="false" data-edit="number">4</div>
+<div class="step-content">
+<h4 class="editable" contenteditable="false" data-edit="text">Store in GNN Memory</h4>
+<p class="editable" contenteditable="false" data-edit="text">All contracts indexed in GNN memory (64×6×6×6×5 = 69,120 nodes per dimension). Keyed by filename for retrieval and improvisation.</p>
+</div>
+</div>
+<div class="step editable" contenteditable="false" data-edit="step">
+<div class="step-number editable" contenteditable="false" data-edit="number">5</div>
+<div class="step-content">
+<h4 class="editable" contenteditable="false" data-edit="text">Regenerate (4 Modes)</h4>
+<p class="editable" contenteditable="false" data-edit="text">Exact preserves structure. Equivalent same behavior, different form. Morph Runtime native equivalent. Improved auto-enhanced with gap fixes.</p>
+</div>
+</div>
+<div class="step editable" contenteditable="false" data-edit="step">
+<div class="step-number editable" contenteditable="false" data-edit="number">6</div>
+<div class="step-content">
+<h4 class="editable" contenteditable="false" data-edit="text">Build OS Canvas</h4>
+<p class="editable" contenteditable="false" data-edit="text">Components become apps, types become docs, hooks become logic modules, MIR contracts become regenerable blocks. Tap any app to interact.</p>
+</div>
+</div>
+<div class="step editable" contenteditable="false" data-edit="step">
+<div class="step-number editable" contenteditable="false" data-edit="number">7</div>
+<div class="step-content">
+<h4 class="editable" contenteditable="false" data-edit="text">Gap Detection</h4>
+<p class="editable" contenteditable="false" data-edit="text">Auto-detects missing auth, error boundaries, state management, prop types, routing. Suggests specific fixes from MIR patterns.</p>
+</div>
+</div>
+<div class="step editable" contenteditable="false" data-edit="step">
+<div class="step-number editable" contenteditable="false" data-edit="number">8</div>
+<div class="step-content">
+<h4 class="editable" contenteditable="false" data-edit="text">Export & Deploy</h4>
+<p class="editable" contenteditable="false" data-edit="text">Export as JSON with all MIR contracts, GNN memory keys, component maps, gap analysis. Integrates with Synthia Server and Trident GNN.</p>
+</div>
+</div>
+</div>
+<div class="add-bar" style="margin-top:12px;">
+<button class="add-btn" onclick="addStep()">+ Add Step</button>
+</div>
+</div>
+</div>
+
+<div class="panel editable" contenteditable="false" data-edit="container">
+<div class="panel-title editable" contenteditable="false" data-edit="text">🖥️ System Log</div>
+<div class="console" id="console">
+<div class="console-line"><span class="timestamp">[17:57]</span> <span class="level-success">Morph OS — Visual Editor initialized</span></div>
+<div class="console-line"><span class="timestamp">[17:57]</span> <span class="level-info">Click ✏️ Edit to make page editable</span></div>
+<div class="console-line"><span class="timestamp">[17:57]</span> <span class="level-info">Click any text, icon, or button to change it</span></div>
+<div class="console-line"><span class="timestamp">[17:57]</span> <span class="level-info">Drag panels to reorder (edit mode)</span></div>
+</div>
+</div>
+</div>
+
+<!-- STYLE EDITOR -->
+<div class="style-editor" id="styleEditor">
+<div class="style-editor-title">🎨 Style Editor — Click any element to edit</div>
+<div class="style-row">
+<label>Text Color</label>
+<input type="color" id="editColor" onchange="applyStyle('color',this.value)">
+</div>
+<div class="style-row">
+<label>Background</label>
+<input type="color" id="editBg" onchange="applyStyle('background',this.value)">
+</div>
+<div class="style-row">
+<label>Font Size</label>
+<input type="range" id="editSize" min="10" max="24" value="13" oninput="applyStyle('fontSize',this.value+'px')">
+</div>
+<div class="style-row">
+<label>Border</label>
+<select id="editBorder" onchange="applyStyle('border',this.value)">
+<option value="none">None</option>
+<option value="1px solid var(--border)">Default</option>
+<option value="1px solid var(--accent)">Accent</option>
+<option value="1px solid var(--mir)">MIR</option>
+<option value="2px dashed var(--edit)">Edit Mode</option>
+</select>
+</div>
+<div class="style-row">
+<button class="btn" style="flex:1;justify-content:center;" onclick="closeStyleEditor()">✅ Done</button>
+<button class="btn" style="flex:1;justify-content:center;" onclick="resetStyles()">↩️ Reset</button>
+</div>
+</div>
+
+<!-- MODALS -->
+<div class="modal-overlay" id="mirModal">
+<div class="modal">
+<div class="modal-header">
+<h3>🔥 MIR Contract Viewer</h3>
+<button class="modal-close" onclick="closeMIRModal()">×</button>
+</div>
+<div class="modal-body">
+<div id="mirModalContent">
+<div style="text-align:center;padding:20px;color:var(--text-dim);font-size:0.8rem;">No contracts yet. Upload files to see MIR data.</div>
+</div>
+</div>
+</div>
+</div>
+
+<div class="modal-overlay" id="modal">
+<div class="modal">
+<div class="modal-header">
+<h3 id="modalTitle">File Preview</h3>
+<button class="modal-close" onclick="closeModal()">×</button>
+</div>
+<div class="modal-body">
+<div class="code-viewer" id="modalContent"></div>
+</div>
+</div>
+</div>
+
+<script>
+const state={files:[],components:[],functions:[],hooks:[],types:[],interfaces:[],enums:[],imports:[],exports:[],widgets:[],gaps:[],osApps:[],mirContracts:[],mirMode:'exact',gnnMemory:{}};
+let editMode=false;
+let selectedElement=null;
+
+function log(m,l='info'){const c=document.getElementById('console');const t=new Date().toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit'});const d=document.createElement('div');d.className='console-line';d.innerHTML='<span class="timestamp">['+t+']</span> <span class="level-'+l+'">'+m+'</span>';c.appendChild(d);c.scrollTop=c.scrollHeight;}
+
+// EDIT MODE TOGGLE
+function toggleEditMode(){editMode=!editMode;document.body.classList.toggle('edit-mode',editMode);const btn=document.getElementById('editToggle');btn.classList.toggle('active',editMode);btn.textContent=editMode?'✅ Done':'✏️ Edit';
+if(editMode){log('Edit mode ON — click any text to edit','info');document.querySelectorAll('.editable').forEach(el=>{el.contentEditable='true';el.addEventListener('click',onElementClick);el.addEventListener('blur',onElementBlur);});document.querySelectorAll('.add-bar').forEach(b=>b.style.display='flex');}else{log('Edit mode OFF — changes saved','success');document.querySelectorAll('.editable').forEach(el=>{el.contentEditable='false';el.removeEventListener('click',onElementClick);el.removeEventListener('blur',onElementBlur);el.style.outline='';});document.querySelectorAll('.add-bar').forEach(b=>b.style.display='none');closeStyleEditor();}}
+
+function onElementClick(e){if(!editMode)return;e.stopPropagation();selectedElement=this;showStyleEditor();}
+function onElementBlur(e){if(!editMode)return;log('Updated: '+this.textContent.substring(0,30),'info');}
+
+// STYLE EDITOR
+function showStyleEditor(){const se=document.getElementById('styleEditor');se.classList.add('active');}
+function closeStyleEditor(){document.getElementById('styleEditor').classList.remove('active');selectedElement=null;}
+function applyStyle(prop,val){if(!selectedElement)return;selectedElement.style[prop]=val;}
+function resetStyles(){if(!selectedElement)return;selectedElement.style.cssText='';}
+
+// ADD ELEMENTS
+function addElement(containerId,type){const container=typeof containerId==='string'?document.getElementById(containerId):containerId;if(!container)return;
+let el;
+switch(type){case'text':el=document.createElement('p');el.className='editable';el.contentEditable='true';el.dataset.edit='text';el.textContent='New text block';break;
+case'icon':el=document.createElement('div');el.className='editable';el.contentEditable='true';el.dataset.edit='emoji';el.style.fontSize='1.5rem';el.textContent='✨';break;
+case'button':el=document.createElement('button');el.className='btn editable';el.contentEditable='true';el.dataset.edit='button';el.textContent='New Button';break;
+case'textarea':el=document.createElement('textarea');el.className='paste-area editable';el.contentEditable='true';el.dataset.edit='code';el.placeholder='Paste code...';break;}
+if(el){el.addEventListener('click',onElementClick);el.addEventListener('blur',onElementBlur);container.appendChild(el);log('Added '+type,'success');}}
+
+function addStep(){const flow=document.getElementById('stepFlow');const num=flow.children.length+1;const step=document.createElement('div');step.className='step editable';step.contentEditable='false';step.dataset.edit='step';step.innerHTML='<div class="step-number editable" contenteditable="true" data-edit="number">'+num+'</div><div class="step-content"><h4 class="editable" contenteditable="true" data-edit="text">New Step</h4><p class="editable" contenteditable="true" data-edit="text">Describe what happens in this step...</p></div>';step.querySelectorAll('.editable').forEach(el=>{el.addEventListener('click',onElementClick);el.addEventListener('blur',onElementBlur);});flow.appendChild(step);log('Added step '+num,'success');}
+
+// DRAG AND DROP REORDERING
+let dragSrcEl=null;
+function initDrag(){document.querySelectorAll('.panel').forEach(p=>{p.draggable=true;p.addEventListener('dragstart',handleDragStart);p.addEventListener('dragover',handleDragOver);p.addEventListener('drop',handleDrop);p.addEventListener('dragend',handleDragEnd);});}
+function handleDragStart(e){if(!editMode)return;e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/html',this.innerHTML);dragSrcEl=this;this.style.opacity='0.4';}
+function handleDragOver(e){if(!editMode)return;e.preventDefault();e.dataTransfer.dropEffect='move';this.style.border='2px dashed var(--edit)';}
+function handleDrop(e){if(!editMode)return;e.stopPropagation();e.preventDefault();if(dragSrcEl!==this){const container=this.parentNode;const next=dragSrcEl.nextSibling===this?dragSrcEl:dragSrcEl.nextSibling;container.insertBefore(dragSrcEl,this);container.insertBefore(this,next);log('Reordered panels','info');}this.style.border='';return false;}
+function handleDragEnd(e){this.style.opacity='1';document.querySelectorAll('.panel').forEach(p=>p.style.border='');}
+
+// FILE HANDLING
+const dz=document.getElementById('dropZone'),fi=document.getElementById('fileInput');
+dz.addEventListener('click',()=>fi.click());dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('dragover');});dz.addEventListener('dragleave',()=>dz.classList.remove('dragover'));dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('dragover');handleFiles(e.dataTransfer.files);});fi.addEventListener('change',e=>handleFiles(e.target.files));
+
+async function handleFiles(fl){log('Processing '+fl.length+' files...','info');for(const f of fl){if(f.name.endsWith('.zip'))await pZip(f);else await pFile(f);}upStats();rFileList();aGaps();upMIR();log('Done! All files ingested','success');}
+async function pZip(zf){log('ZIP: '+zf.name,'info');try{const z=await JSZip.loadAsync(zf);const ef=[];const zp=[];z.forEach((rp,ze)=>{if(!ze.dir){zp.push(ze.async('string').then(c=>{ef.push({name:rp,content:c,size:c.length});}));}});await Promise.all(zp);ef.forEach(f=>{const p=parseTSX(f.content,f.name);const m=genMIR(p,f.name,f.content);state.files.push({id:Date.now()+Math.random(),name:f.name,size:f.size,type:gFT(f.name),content:f.content,status:'mir',parsed:p,mirContract:m});state.mirContracts.push(m);mergeP(p);storeGNN(m);});log('ZIP: '+ef.length+' files → MIR','success');}catch(e){log('ZIP error: '+e.message,'error');}}
+async function pFile(f){const c=await f.text();const p=parseTSX(c,f.name);const m=genMIR(p,f.name,c);state.files.push({id:Date.now()+Math.random(),name:f.name,size:f.size,type:gFT(f.name),content:c,status:'mir',parsed:p,mirContract:m});state.mirContracts.push(m);mergeP(p);storeGNN(m);log('MIR: '+f.name+' ('+m.signatures.length+' sigs)','success');}
+
+function gFT(fn){const e=fn.split('.').pop().toLowerCase();const t={tsx:'tsx',ts:'ts',jsx:'jsx',js:'js',html:'html',css:'css',json:'json',py:'py',md:'md',png:'img',jpg:'img',jpeg:'img',gif:'img',svg:'img',webp:'img',pdf:'doc',doc:'doc',docx:'doc',txt:'txt',csv:'data',xml:'data',yml:'config',yaml:'config',sql:'sql',sh:'bash',bash:'bash',zsh:'bash',rs:'rust',go:'go',rb:'ruby',php:'php',java:'java',kt:'kotlin',swift:'swift',c:'c',cpp:'cpp',h:'c',hpp:'cpp',cs:'csharp',fs:'fsharp',scala:'scala',clj:'clojure',ex:'elixir',exs:'elixir',elm:'elm',hs:'haskell',lua:'lua',r:'r',jl:'julia',dart:'dart',ps1:'powershell',bat:'batch',dockerfile:'docker',tf:'terraform',vue:'vue',svelte:'svelte',astro:'astro',sol:'solidity'};return t[e]||'file';}
+
+function parseTSX(c,fn){const r={components:[],functions:[],hooks:[],types:[],interfaces:[],enums:[],imports:[],exports:[]};try{const a=Babel.parse(c,{sourceType:'module',presets:['typescript','jsx'],filename:fn});travAST(a,r,fn);}catch(e){regexP(c,fn,r);}return r;}
+function travAST(a,r,fn){if(!a||!a.program||!a.program.body)return;const b=a.program.body;b.forEach(n=>{if(n.type==='FunctionDeclaration'&&n.id){const nm=n.id.name;const ic=isCN(nm)&&hasJSX(n);const ih=nm.startsWith('use')&&nm.length>3;if(ic)r.components.push({name:nm,source:fn,line:n.loc?n.loc.start.line:0,params:exP(n.params),isDefaultExport:false,propsInterface:fPI(nm,b)});else if(ih)r.hooks.push({name:nm,source:fn,line:n.loc?n.loc.start.line:0,params:exP(n.params)});else r.functions.push({name:nm,type:'function',source:fn,line:n.loc?n.loc.start.line:0,params:exP(n.params)});}if(n.type==='VariableDeclaration'){n.declarations.forEach(d=>{if(d.id&&d.init&&(d.init.type==='ArrowFunctionExpression'||d.init.type==='FunctionExpression')){const nm=d.id.name;const ic=isCN(nm)&&hasJSX(d.init);const ih=nm.startsWith('use')&&nm.length>3;if(ic)r.components.push({name:nm,source:fn,line:n.loc?n.loc.start.line:0,params:exP(d.init.params),isDefaultExport:false,propsInterface:fPI(nm,b)});else if(ih)r.hooks.push({name:nm,source:fn,line:n.loc?n.loc.start.line:0,params:exP(d.init.params)});else r.functions.push({name:nm,type:'arrow',source:fn,line:n.loc?n.loc.start.line:0,params:exP(d.init.params)});}});}if(n.type==='TSInterfaceDeclaration'){r.interfaces.push({name:n.id.name,source:fn,line:n.loc?n.loc.start.line:0,members:n.body&&n.body.body?n.body.body.length:0});if(n.id.name.includes('Props'))r.types.push({name:n.id.name,kind:'interface',source:fn,line:n.loc?n.loc.start.line:0});}if(n.type==='TSTypeAliasDeclaration')r.types.push({name:n.id.name,kind:'alias',source:fn,line:n.loc?n.loc.start.line:0});if(n.type==='TSEnumDeclaration')r.enums.push({name:n.id.name,source:fn,line:n.loc?n.loc.start.line:0,members:n.members?n.members.length:0});if(n.type==='ImportDeclaration')r.imports.push({source:n.source.value,specifiers:n.specifiers.map(s=>s.local.name),filename:fn});if(n.type==='ExportNamedDeclaration'&&n.declaration&&n.declaration.id){const e=r.components.find(c=>c.name===n.declaration.id.name)||r.functions.find(f=>f.name===n.declaration.id.name)||r.hooks.find(h=>h.name===n.declaration.id.name);if(e)e.exported=true;r.exports.push({name:n.declaration.id.name,source:fn});}if(n.type==='ExportDefaultDeclaration'&&n.declaration&&n.declaration.id){const e=r.components.find(c=>c.name===n.declaration.id.name);if(e){e.isDefaultExport=true;e.exported=true;}r.exports.push({name:n.declaration.id.name,source:fn,default:true});}});}
+function isCN(n){return n&&n[0]===n[0].toUpperCase()&&n.length>1;}
+function hasJSX(n){if(!n)return false;if(n.type==='JSXElement'||n.type==='JSXFragment')return true;const k=Object.keys(n);for(const key of k){if(key==='type')continue;const v=n[key];if(v&&typeof v==='object'){if(Array.isArray(v)){for(const i of v){if(hasJSX(i))return true;}}else if(hasJSX(v))return true;}}return false;}
+function exP(p){if(!p)return'';return p.map(x=>{if(x.type==='Identifier')return x.name;if(x.type==='ObjectPattern')return'{...}';if(x.type==='ArrayPattern')return'[...]';return'?';}).join(', ');}
+function fPI(cn,b){const pn=cn+'Props';const i=b.find(n=>n.type==='TSInterfaceDeclaration'&&n.id&&n.id.name===pn);if(i&&i.body&&i.body.body){return i.body.body.map(m=>{if(m.type==='TSPropertySignature'&&m.key)return m.key.name||'unknown';return null;}).filter(Boolean);}return null;}
+function regexP(c,fn,r){const cr=/(?:function|const)\s+([A-Z][A-Za-z0-9_]*)\s*(?:<[^>]*>\s*)?(?:\([^)]*\)|=\s*(?:\([^)]*\)|[^=]*))\s*(?::\s*[^{]+)?\s*(?:=>\s*)?\{/g;let m;while((m=cr.exec(c))!==null)r.components.push({name:m[1],source:fn,line:c.substring(0,m.index).split('
+').length,params:'props',isDefaultExport:false,propsInterface:null});const hr=/(?:function|const)\s+(use[A-Z][A-Za-z0-9_]*)\s*(?:<[^>]*>\s*)?(?:\([^)]*\)|=\s*(?:\([^)]*\)|[^=]*))\s*(?::\s*[^{]+)?\s*(?:=>\s*)?\{/g;while((m=hr.exec(c))!==null)r.hooks.push({name:m[1],source:fn,line:c.substring(0,m.index).split('
+').length,params:'reactive'});const fr=/function\s+([a-z_][A-Za-z0-9_]*)\s*\([^)]*\)\s*(?::\s*[^{]+)?\s*\{/g;while((m=fr.exec(c))!==null){if(!m[1].startsWith('use'))r.functions.push({name:m[1],type:'function',source:fn,line:c.substring(0,m.index).split('
+').length,params:'args'});}const ir=/interface\s+([A-Z][A-Za-z0-9_]*)\s*\{/g;while((m=ir.exec(c))!==null){r.interfaces.push({name:m[1],source:fn,line:c.substring(0,m.index).split('
+').length,members:0});if(m[1].includes('Props'))r.types.push({name:m[1],kind:'interface',source:fn,line:c.substring(0,m.index).split('
+').length});}const tr=/type\s+([A-Z][A-Za-z0-9_]*)\s*=\s*/g;while((m=tr.exec(c))!==null)r.types.push({name:m[1],kind:'alias',source:fn,line:c.substring(0,m.index).split('
+').length});const er=/export\s+(?:default\s+)?(?:const|function|class|interface|type)?\s*([A-Z][A-Za-z0-9_]*)/g;while((m=er.exec(c))!==null){r.exports.push({name:m[1],source:fn});const cp=r.components.find(x=>x.name===m[1]);if(cp)cp.exported=true;}}
+function genMIR(p,fn,oc){const c={id:'mir_'+Date.now()+'_'+Math.random().toString(36).substr(2,9),sourceFile:fn,originalSize:oc.length,signatures:[],types:[],exports:[],imports:[],components:[],hooks:[],learnedAt:new Date().toISOString()};p.components.forEach(x=>{c.signatures.push({name:x.name,type:'component',params:x.params,props:x.propsInterface,exported:x.exported,default:x.isDefaultExport});c.components.push(x.name);});p.functions.forEach(x=>c.signatures.push({name:x.name,type:x.type,params:x.params,exported:x.exported}));p.hooks.forEach(x=>{c.signatures.push({name:x.name,type:'hook',params:x.params,exported:x.exported});c.hooks.push(x.name);});p.types.forEach(x=>c.types.push({name:x.name,kind:x.kind}));p.interfaces.forEach(x=>c.types.push({name:x.name,kind:'interface',members:x.members}));p.enums.forEach(x=>c.types.push({name:x.name,kind:'enum',members:x.members}));p.exports.forEach(x=>c.exports.push(x.name));p.imports.forEach(x=>c.imports.push({source:x.source,specifiers:x.specifiers}));return c;}
+function storeGNN(c){const k=c.sourceFile.replace(/[^a-zA-Z0-9]/g,'_');state.gnnMemory[k]=c;document.getElementById('statMIR').textContent=state.mirContracts.length;}
+function mergeP(p){state.components.push(...p.components);state.functions.push(...p.functions);state.hooks.push(...p.hooks);state.types.push(...p.types);state.interfaces.push(...p.interfaces);state.enums.push(...p.enums);state.imports.push(...p.imports);state.exports.push(...p.exports);}
+function parsePastedCode(){const c=document.getElementById('pasteArea').value;if(!c.trim()){log('No code to parse','warn');return;}log('Parsing pasted code → MIR contract...','info');const p=parseTSX(c,'pasted.tsx');const m=genMIR(p,'pasted.tsx',c);state.files.push({id:Date.now(),name:'pasted-'+Date.now()+'.tsx',size:c.length,type:'tsx',content:c,status:'mir',parsed:p,mirContract:m});state.mirContracts.push(m);mergeP(p);storeGNN(m);upStats();rFileList();rComps();rFuncs();upMIR();aGaps();log('MIR: '+m.signatures.length+' signatures stored in GNN','success');document.getElementById('pasteArea').value='';}
+function rFileList(){const l=document.getElementById('fileList');if(state.files.length===0){l.innerHTML='<div style="text-align:center;padding:16px;color:var(--text-dim);font-size:0.75rem;">No files yet. Drop anything here.</div>';return;}l.innerHTML=state.files.map(f=>{const co=f.type==='tsx'?'#3178c6':f.type==='ts'?'#2b7489':f.type==='img'?'#f59e0b':f.type==='doc'?'#ef4444':'#64748b';const cc=f.parsed?f.parsed.components.length:0;const tc=f.parsed?f.parsed.types.length:0;return'<div class="file-item" onclick="previewFile('+f.id+')">'+'<div class="file-icon" style="background:'+co+'15;color:'+co+';">'+(f.type==='tsx'?'📘':f.type==='img'?'🖼️':f.type==='doc'?'📄':'📄')+'</div>'+'<div class="file-info"><div class="file-name">'+f.name+'</div>'+'<div class="file-meta">'+fsize(f.size)+' · '+cc+' comps · '+tc+' types</div></div>'+'<div class="file-status status-mir">MIR</div></div>';}).join('');}
+function rComps(){const m=document.getElementById('componentMap');if(state.components.length===0){m.innerHTML='<div style="text-align:center;padding:30px;color:var(--text-dim);font-size:0.8rem;">No React components found. Drop .tsx files.</div>';return;}m.innerHTML=state.components.map(c=>{const pl=c.propsInterface?c.propsInterface.join(', '):'none';return'<div class="function-node">'+'<div class="fn-icon">⚛️</div>'+'<div class="fn-info"><div class="fn-name">'+c.name+(c.exported?' <span class="tag accent">EXPORT</span>':'')+(c.isDefaultExport?' <span class="tag accent">DEFAULT</span>':'')+'</div>'+'<div class="fn-source">'+c.source+':'+c.line+'</div>'+'<div class="fn-tags"><span class="tag accent">React</span><span class="tag">props: {'+pl+'}</span><span class="tag">'+c.params+'</span></div></div></div>';}).join('');}
+function rFuncs(){const m=document.getElementById('functionMap');const af=[...state.functions,...state.hooks];if(af.length===0){m.innerHTML='<div style="text-align:center;padding:30px;color:var(--text-dim);font-size:0.8rem;">No functions found. Drop code files.</div>';return;}m.innerHTML=af.map(f=>{const ih=f.name&&f.name.startsWith('use');return'<div class="function-node">'+'<div class="fn-icon">'+(ih?'🎣':'⚡')+'</div>'+'<div class="fn-info"><div class="fn-name">'+f.name+(f.exported?' <span class="tag accent">EXPORT</span>':'')+(ih?' <span class="tag mir">HOOK</span>':'')+'</div>'+'<div class="fn-source">'+f.source+':'+f.line+'</div>'+'<div class="fn-tags"><span class="tag">'+(ih?'hook':f.type)+'</span><span class="tag">'+f.params+'</span></div></div></div>';}).join('');}
+function aGaps(){const g=[];const ha=state.components.some(c=>c.name.toLowerCase().includes('auth'))||state.functions.some(f=>f.name.toLowerCase().includes('auth'));const he=state.components.some(c=>c.name.toLowerCase().includes('error'))||state.functions.some(f=>f.name.toLowerCase().includes('error'));const hs=state.hooks.some(h=>h.name.includes('useState')||h.name.includes('useReducer')||h.name.includes('useContext'));const uc=state.components.filter(c=>!c.propsInterface||c.propsInterface.length===0);if(!ha&&state.files.length>0)g.push({type:'Auth Missing',desc:'No authentication system detected in codebase.',solution:'💡 Add a useAuth hook with typed session management. Example: interface AuthState { user: User | null; login: (creds) => void; }'});if(!he&&state.components.length>0)g.push({type:'Error Boundary',desc:'No ErrorBoundary component found for crash handling.',solution:'💡 Create a typed ErrorBoundary with fallback UI. Wrap route-level components.'});if(!hs&&state.components.length>0)g.push({type:'State Management',desc:'Components detected but no state management pattern.',solution:'💡 Add useState/useReducer hooks or a Zustand store with typed slices.'});if(uc.length>0)g.push({type:'Untyped Props',desc:uc.length+' React components lack typed props interfaces.',solution:'💡 Add '+uc[0].name+'Props interface with explicit types for each prop.'});if(state.mirContracts.length===0&&state.files.length>0)g.push({type:'MIR Not Learning',desc:'Files uploaded but no MIR contracts generated.',solution:'💡 Ensure files contain parseable code. Paste code directly if file parsing fails.'});state.gaps=g;const gc=document.getElementById('gapSuggestions');if(g.length===0){gc.innerHTML='<div class="gap-card" style="border-left-color:var(--accent);"><div class="gap-type" style="color:var(--accent);">✅ Solid</div><div class="gap-desc">No gaps detected. Your codebase is well-structured.</div></div>';return;}gc.innerHTML=g.map(x=>'<div class="gap-card"><div class="gap-type">'+x.type+'</div><div class="gap-desc">'+x.desc+'</div><div class="gap-solution">'+x.solution+'</div></div>').join('');}
+function buildOS(){log('Building Morph OS from MIR contracts...','info');const a=[];if(state.components.length>0)a.push({name:'Components',icon:'⚛️',desc:state.components.length+' comps',color:'#00d4aa'});if(state.hooks.length>0)a.push({name:'Hooks',icon:'🎣',desc:state.hooks.length+' hooks',color:'#a855f7'});if(state.functions.length>0)a.push({name:'Functions',icon:'⚡',desc:state.functions.length+' funcs',color:'#7c3aed'});if(state.interfaces.length>0)a.push({name:'Interfaces',icon:'📘',desc:state.interfaces.length+' ifaces',color:'#3178c6'});if(state.types.length>0)a.push({name:'Types',icon:'📋',desc:state.types.length+' types',color:'#2b7489'});if(state.enums.length>0)a.push({name:'Enums',icon:'🔢',desc:state.enums.length+' enums',color:'#f0abfc'});if(state.mirContracts.length>0)a.push({name:'MIR',icon:'🔥',desc:state.mirContracts.length+' contracts',color:'#a855f7'});a.push({name:'GNN',icon:'🧠',desc:Object.keys(state.gnnMemory).length+' stored',color:'#00d4aa'});a.push({name:'Files',icon:'📁',desc:state.files.length+' ingested',color:'#64748b'});state.osApps=a;const cv=document.getElementById('osCanvas');cv.innerHTML='<div class="os-grid">'+a.map((ap,i)=>'<div class="os-app" style="animation:fadeIn 0.25s ease '+(i*0.04)+'s both;">'+'<div class="app-icon" style="background:linear-gradient(135deg,'+ap.color+','+ap.color+'88);">'+ap.icon+'</div>'+'<div class="app-name">'+ap.name+'</div>'+'<div class="app-desc">'+ap.desc+'</div></div>').join('')+'</div>';log('OS assembled: '+a.length+' apps','success');}
+function switchTab(e,tn){document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));document.querySelectorAll('.tab-content').forEach(c=>c.classList.remove('active'));e.target.classList.add('active');document.getElementById('tab-'+tn).classList.add('active');if(tn==='components')rComps();if(tn==='functions')rFuncs();}
+function upStats(){document.getElementById('statFiles').textContent=state.files.length;document.getElementById('statComponents').textContent=state.components.length;document.getElementById('statFunctions').textContent=state.functions.length+state.hooks.length;document.getElementById('statMIR').textContent=state.mirContracts.length;}
+function fsize(b){if(b<1024)return b+'B';if(b<1024*1024)return(b/1024).toFixed(1)+'KB';return(b/(1024*1024)).toFixed(1)+'MB';}
+function previewFile(id){const fi=state.files.find(x=>x.id===id);if(!fi)return;document.getElementById('modalTitle').textContent=fi.name;const el=document.getElementById('modalContent');if(fi.content){el.textContent=fi.content;}else{el.innerHTML='<div style="color:var(--text-dim);padding:20px;text-align:center;">Binary / non-text file<br>'+fi.name+'<br>'+fsize(fi.size)+'</div>';}document.getElementById('modal').classList.add('active');}
+function closeModal(){document.getElementById('modal').classList.remove('active');}
+function showMIRPanel(){const mc=document.getElementById('mirModalContent');if(state.mirContracts.length===0){mc.innerHTML='<div style="text-align:center;padding:20px;color:var(--text-dim);font-size:0.8rem;">No contracts yet. Upload files to see MIR data.</div>';}else{const l=state.mirContracts[state.mirContracts.length-1];mc.innerHTML='<div class="mir-panel"><div class="mir-panel-title">🎯 Latest Contract</div><div style="font-size:0.75rem;color:var(--text-dim);font-family:monospace;">ID: '+l.id+'</div><div style="font-size:0.75rem;color:var(--text-dim);margin-top:4px;">File: '+l.sourceFile+'</div><div style="font-size:0.8rem;color:var(--mir);margin-top:6px;font-weight:700;">'+l.signatures.length+' signatures · '+l.types.length+' types · '+l.exports.length+' exports</div></div>'+'<div class="mir-panel"><div class="mir-panel-title">📊 All Contracts</div><div style="display:flex;flex-direction:column;gap:4px;">'+state.mirContracts.slice(-6).map(c=>'<div style="font-size:0.75rem;padding:6px;background:var(--bg);border-radius:6px;border:1px solid var(--border);"><span style="color:var(--mir);font-weight:600;">'+c.sourceFile+'</span> <span style="color:var(--text-dim);">— '+c.signatures.length+' sigs</span></div>').join('')+'</div></div>'+'<div class="mir-panel"><div class="mir-panel-title">🧠 GNN Memory Keys</div><div style="display:flex;flex-wrap:wrap;gap:4px;">'+Object.keys(state.gnnMemory).slice(0,10).map(k=>'<span class="tag mir">'+k+'</span>').join('')+'</div></div>';}document.getElementById('mirModal').classList.add('active');}
+function closeMIRModal(){document.getElementById('mirModal').classList.remove('active');}
+function upMIR(){const ml=document.getElementById('mirMemoryList');const lt=document.getElementById('mirLatest');if(state.mirContracts.length===0){ml.innerHTML='<div style="padding:3px 0;">No contracts stored</div>';lt.innerHTML='<div>Upload files to generate MIR contracts</div>';return;}const l=state.mirContracts[state.mirContracts.length-1];ml.innerHTML=Object.keys(state.gnnMemory).slice(0,6).map(k=>'<div style="padding:3px 0;font-family:monospace;">• '+k+'</div>').join('');lt.innerHTML='<div style="font-weight:600;">'+l.sourceFile+'</div><div style="color:var(--mir);margin-top:4px;">'+l.signatures.length+' signatures · '+l.types.length+' types</div>';}
+function setRegenMode(md){state.mirMode=md;document.querySelectorAll('.regen-btn').forEach(b=>b.classList.remove('active'));event.target.classList.add('active');log('MIR mode: '+md,'info');}
+function exportMIR(){if(state.files.length===0){log('Nothing to export','warn');return;}log('Exporting MIR bundle...','info');const d={files:state.files.map(f=>({name:f.name,type:f.type,size:f.size,mirId:f.mirContract?f.mirContract.id:null})),components:state.components.map(c=>({name:c.name,source:c.source,props:c.propsInterface,exported:c.exported})),hooks:state.hooks.map(h=>({name:h.name,source:h.source})),functions:state.functions.map(f=>({name:f.name,type:f.type,source:f.source})),types:state.types.map(t=>({name:t.name,kind:t.kind,source:t.source})),mirContracts:state.mirContracts,gnnMemory:Object.keys(state.gnnMemory),gaps:state.gaps,osApps:state.osApps,exportedAt:new Date().toISOString(),version:'morph-os-visual-editor-v1'};const b=new Blob([JSON.stringify(d,null,2)],{type:'application/json'});const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download='morph-os-visual-editor.json';document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(u);log('Exported: morph-os-visual-editor.json','success');}
+
+// INIT
+document.getElementById('modal').addEventListener('click',e=>{if(e.target===document.getElementById('modal'))closeModal();});
+document.getElementById('mirModal').addEventListener('click',e=>{if(e.target===document.getElementById('mirModal'))closeMIRModal();});
+initDrag();
+log('Visual Editor ready — click ✏️ Edit to start editing','success');
+</script>
+</body>
+</html>
