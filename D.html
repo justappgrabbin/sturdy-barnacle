@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Morph OS — Client</title>
+  <style>
+    :root {
+      --bg: #050508;
+      --surface: #0a0a12;
+      --elevated: #11111a;
+      --border: #1a1a2a;
+      --text: #e0e0e8;
+      --dim: #606070;
+      --accent: #7c3aed;
+      --accent2: #06b6d4;
+      --warn: #f59e0b;
+      --ok: #22c55e;
+      --error: #ef4444;
+      --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      --mono: 'SF Mono', Monaco, Consolas, monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      height: 100vh;
+      width: 100vw;
+      overflow: hidden;
+      background: radial-gradient(circle at 20% -10%, rgba(124,58,237,.18), transparent 32%),
+                  radial-gradient(circle at 110% 30%, rgba(6,182,212,.12), transparent 28%),
+                  var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .status-bar {
+      height: 28px;
+      background: rgba(5,5,8,.95);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      gap: 10px;
+      font-size: 11px;
+      z-index: 9999;
+    }
+    .brand { color: var(--accent); font-weight: 700; }
+    .dim { color: var(--dim); }
+    .spacer { flex: 1; }
+    .status-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--dim);
+      transition: .3s;
+    }
+    .status-dot.ready { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+    .status-dot.busy { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+
+    .stage {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+    .home-dash {
+      position: absolute;
+      inset: 0;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .home-dash::-webkit-scrollbar { display: none; }
+
+    .widget-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .widget {
+      background: linear-gradient(180deg, rgba(255,255,255,.035), transparent), var(--elevated);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px;
+      min-width: 140px;
+      flex: 1;
+      min-height: 100px;
+      cursor: pointer;
+      transition: .2s;
+    }
+    .widget:active { transform: scale(.97); }
+    .widget:hover { border-color: var(--accent); }
+    .widget-header { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .5px; }
+    .widget-value { font: 700 24px var(--mono); color: var(--text); }
+    .widget-sub { font-size: 11px; color: var(--dim); }
+
+    .section-title {
+      font-size: 11px;
+      color: var(--dim);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-top: 8px;
+    }
+
+    .app-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      padding: 8px 0 80px;
+    }
+    .app-icon {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 4px;
+      border-radius: 14px;
+      cursor: pointer;
+      position: relative;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .app-icon:active { transform: scale(.88); background: rgba(124,58,237,.1); }
+    .app-icon-img {
+      width: 56px; height: 56px;
+      border-radius: 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      transition: .2s;
+    }
+    .app-icon-label {
+      font-size: 10px;
+      color: var(--text);
+      text-align: center;
+      max-width: 68px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .uninstall-btn {
+      display: none;
+      position: absolute;
+      top: -4px;
+      right: 4px;
+      width: 20px; height: 20px;
+      border-radius: 50%;
+      background: var(--error);
+      color: white;
+      border: 0;
+      font-size: 12px;
+      z-index: 2;
+    }
+    body.jiggle .app-icon.generated .app-icon-img { animation: jiggle .35s ease infinite alternate; }
+    body.jiggle .generated .uninstall-btn { display: flex; align-items: center; justify-content: center; }
+    @keyframes jiggle {
+      from { transform: rotate(-2deg); }
+      to { transform: rotate(2deg); }
+    }
+
+    /* app windows */
+    .app-window {
+      position: absolute;
+      inset: 0;
+      background: var(--bg);
+      display: none;
+      flex-direction: column;
+      z-index: 100;
+      animation: slideUp .25s cubic-bezier(.4,0,.2,1);
+    }
+    .app-window.active { display: flex; }
+    @keyframes slideUp {
+      from { transform: translateY(100%); opacity: 0; }
+      to { transform: none; opacity: 1; }
+    }
+    .app-header {
+      height: 44px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      gap: 10px;
+    }
+    .back-btn {
+      width: 32px; height: 32px;
+      border-radius: 8px;
+      background: var(--elevated);
+      border: 1px solid var(--border);
+      color: var(--text);
+      cursor: pointer;
+    }
+    .app-title { flex: 1; font-size: 14px; font-weight: 650; }
+    .app-body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+
+    .settings-section {
+      padding: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .setting-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 0;
+      gap: 12px;
+    }
+    .setting-label { font-size: 13px; }
+    .setting-hint { font-size: 11px; color: var(--dim); }
+    input, textarea {
+      background: var(--elevated);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 12px;
+      color: var(--text);
+      font-size: 13px;
+      font-family: var(--mono);
+      width: 100%;
+    }
+    .btn-sm {
+      padding: 6px 10px;
+      border-radius: 6px;
+      border: 0;
+      font-size: 11px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .btn-primary { background: var(--accent); color: white; }
+    .btn-secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+
+    .upload-zone {
+      margin: 12px;
+      border: 2px dashed var(--border);
+      border-radius: 16px;
+      padding: 32px 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: .2s;
+    }
+    .upload-zone:hover, .upload-zone.dragover {
+      border-color: var(--accent);
+      background: rgba(124,58,237,.05);
+    }
+    .file-list {
+      padding: 12px;
+    }
+    .file-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+    }
+    .toast {
+      position: fixed;
+      bottom: 80px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--elevated);
+      border: 1px solid var(--border);
+      padding: 10px 16px;
+      border-radius: 10px;
+      font-size: 12px;
+      z-index: 10000;
+      pointer-events: none;
+      white-space: nowrap;
+      box-shadow: 0 12px 40px rgba(0,0,0,.35);
+      animation: toastIn .25s ease;
+    }
+    @keyframes toastIn {
+      from { opacity: 0; transform: translateX(-50%) translateY(10px); }
+      to { opacity: 1; transform: translateX(-50%); }
+    }
+    .dock {
+      height: 64px;
+      background: rgba(10,10,18,.95);
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      padding: 0 20px;
+      backdrop-filter: blur(20px);
+      z-index: 9998;
+    }
+    .dock-btn {
+      width: 48px; height: 48px;
+      border-radius: 14px;
+      background: var(--elevated);
+      border: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+      cursor: pointer;
+      transition: .2s;
+    }
+    .dock-btn.active { background: rgba(124,58,237,.2); border-color: var(--accent); }
+
+    @media (min-width: 768px) {
+      .app-grid { grid-template-columns: repeat(6, 1fr); }
+      body { max-width: 520px; margin: 0 auto; border-left: 1px solid var(--border); border-right: 1px solid var(--border); }
+    }
+  </style>
+</head>
+<body>
+<div class="status-bar">
+  <span class="brand">Morph OS</span><span class="dim">client</span>
+  <span class="spacer"></span>
+  <div class="status-dot" id="statusDot"></div>
+  <span class="dim" id="statusText">Ready</span>
+  <span class="dim" id="clock"></span>
+</div>
+
+<div class="stage" id="stage">
+  <!-- Home dashboard -->
+  <div class="home-dash" id="homeDash">
+    <div class="widget-row">
+      <div class="widget" onclick="openApp('settings')">
+        <div class="widget-header">⚙️ Backend</div>
+        <div class="widget-value" id="backendStatus">❌</div>
+        <div class="widget-sub">click to set URL</div>
+      </div>
+      <div class="widget" onclick="openApp('files')">
+        <div class="widget-header">📁 Files</div>
+        <div class="widget-value" id="widgetFiles">0</div>
+        <div class="widget-sub">stored</div>
+      </div>
+      <div class="widget" onclick="openApp('upload')">
+        <div class="widget-header">📤 Upload</div>
+        <div class="widget-value" id="widgetUploads">0</div>
+        <div class="widget-sub">files sent</div>
+      </div>
+    </div>
+    <div class="section-title">Apps</div>
+    <div class="app-grid" id="appGrid"></div>
+  </div>
+
+  <!-- Settings App (where you set backend URL) -->
+  <div class="app-window" id="win-settings">
+    <div class="app-header">
+      <button class="back-btn" onclick="closeApp('settings')">←</button>
+      <span class="app-title">⚙️ Backend Config</span>
+    </div>
+    <div class="app-body">
+      <div class="settings-section">
+        <h3>Python Backend URL</h3>
+        <div class="setting-row">
+          <input type="text" id="backendUrlInput" placeholder="http://localhost:5000 or https://your-backend.onrender.com" value="http://localhost:5000">
+        </div>
+        <div class="setting-row">
+          <button class="btn-sm btn-primary" onclick="saveBackendUrl()">Save & Test</button>
+          <button class="btn-sm btn-secondary" onclick="testBackend()">Test Connection</button>
+        </div>
+        <div class="setting-hint" id="backendTestResult">Enter your backend URL (must support /upload, /morph, /status).</div>
+      </div>
+      <div class="settings-section">
+        <h3>Expected API endpoints</h3>
+        <div style="font-size:12px; color:var(--dim); line-height:1.6">
+          <strong>POST /upload</strong> – multipart/form-data with 'files' field. Returns { success: true, viewUrl: "..." }<br>
+          <strong>POST /morph</strong> – JSON { prompt, text, hasFiles, fileNames, ... } returns { type, title, body, ... }<br>
+          <strong>GET /status</strong> – returns { ready: true }<br>
+          (You can implement only /upload if you just need file hosting)
+        </div>
+      </div>
+      <div class="settings-section">
+        <h3>Local files (browser storage)</h3>
+        <button class="btn-sm btn-secondary" onclick="resetAllData()">Reset All Data</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Files App -->
+  <div class="app-window" id="win-files">
+    <div class="app-header">
+      <button class="back-btn" onclick="closeApp('files')">←</button>
+      <span class="app-title">📁 Files</span>
+    </div>
+    <div class="app-body" id="filesBody"></div>
+  </div>
+
+  <!-- Upload App -->
+  <div class="app-window" id="win-upload">
+    <div class="app-header">
+      <button class="back-btn" onclick="closeApp('upload')">←</button>
+      <span class="app-title">📤 Upload to Backend</span>
+    </div>
+    <div class="app-body">
+      <div class="upload-zone" id="uploadZone" onclick="fileInput.click()" ondragover="event.preventDefault();this.classList.add('dragover')" ondragleave="this.classList.remove('dragover')" ondrop="handleDrop(event)">
+        <div class="upload-icon">📦</div>
+        <div>Drop files here (or click)</div>
+        <div class="dim" style="font-size:10px">HTML, JS, CSS, images – will be sent to backend</div>
+      </div>
+      <input type="file" id="fileInput" multiple style="display:none" onchange="handleFiles(event)">
+      <div id="uploadQueue" class="file-list"></div>
+    </div>
+  </div>
+</div>
+
+<div class="dock" id="dock"></div>
+
+<script>
+  // ----------------------------- GLOBAL STATE -----------------------------
+  let BACKEND_URL = localStorage.getItem('morph_backend_url') || 'http://localhost:5000';
+  let uploadedFiles = []; // store file objects for display
+  let fileStorage = JSON.parse(localStorage.getItem('morph_local_files') || '{}'); // for local previews
+  let uploadCount = 0;
+
+  // Helper functions
+  function $(id) { return document.getElementById(id); }
+  function toast(msg) {
+    let t = document.querySelector('.toast');
+    if (t) t.remove();
+    let div = document.createElement('div');
+    div.className = 'toast';
+    div.textContent = msg;
+    document.body.appendChild(div);
+    setTimeout(() => { div.style.opacity = '0'; setTimeout(() => div.remove(), 300); }, 2500);
+  }
+  function setStatus(ready, text) {
+    let dot = $('#statusDot');
+    let statusText = $('#statusText');
+    dot.className = 'status-dot ' + (ready ? 'ready' : 'busy');
+    statusText.textContent = text;
+  }
+  function updateClock() {
+    $('#clock').textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+  function saveLocalFiles() {
+    localStorage.setItem('morph_local_files', JSON.stringify(fileStorage));
+    $('#widgetFiles').textContent = Object.keys(fileStorage).length;
+  }
+  function refreshFilesList() {
+    let container = $('#filesBody');
+    let files = Object.keys(fileStorage).sort();
+    if (!files.length) {
+      container.innerHTML = '<div style="color:var(--dim);text-align:center;padding:40px">No files stored locally</div>';
+      return;
+    }
+    container.innerHTML = files.map(name => `
+      <div class="file-row" onclick="viewLocalFile('${escapeAttr(name)}')">
+        <span>📄</span>
+        <div style="flex:1">${escapeHtml(name)}</div>
+        <button onclick="event.stopPropagation();deleteLocalFile('${escapeAttr(name)}')" style="background:none;border:0;color:var(--error);cursor:pointer">🗑️</button>
+      </div>
+    `).join('');
+  }
+  function viewLocalFile(name) {
+    let content = fileStorage[name];
+    if (!content) return;
+    if (name.endsWith('.html') || name.endsWith('.htm')) {
+      let blob = new Blob([content], {type: 'text/html'});
+      let url = URL.createObjectURL(blob);
+      openApp('browser'); // we don't have browser app in this minimal version, but we can simulate
+      toast('Opening in new tab');
+      window.open(url, '_blank');
+    } else {
+      toast(name + ' — ' + content.length + ' bytes');
+    }
+  }
+  function deleteLocalFile(name) {
+    if (confirm('Delete ' + name + '?')) {
+      delete fileStorage[name];
+      saveLocalFiles();
+      refreshFilesList();
+      toast('Deleted');
+    }
+  }
+  function resetAllData() {
+    if (confirm('⚠️ Clear ALL local files and reset backend URL?')) {
+      fileStorage = {};
+      saveLocalFiles();
+      localStorage.removeItem('morph_backend_url');
+      BACKEND_URL = 'http://localhost:5000';
+      $('#backendUrlInput').value = BACKEND_URL;
+      refreshFilesList();
+      toast('Data cleared. Reload page for full reset.');
+    }
+  }
+  function saveBackendUrl() {
+    let newUrl = $('#backendUrlInput').value.trim();
+    if (!newUrl) return;
+    BACKEND_URL = newUrl;
+    localStorage.setItem('morph_backend_url', BACKEND_URL);
+    toast('Backend URL saved: ' + BACKEND_URL);
+    testBackend();
+  }
+  async function testBackend() {
+    setStatus(false, 'Testing...');
+    try {
+      let res = await fetch(BACKEND_URL + '/status', { method: 'GET', headers: { 'Accept': 'application/json' } });
+      let data = await res.json();
+      let ok = data.ready === true;
+      setStatus(ok, ok ? 'Online' : 'Online (no /status)');
+      $('#backendTestResult').textContent = ok ? '✅ Backend reachable' : '⚠️ Backend responded but /status missing';
+      $('#backendStatus').innerHTML = ok ? '✅' : '⚠️';
+    } catch (e) {
+      setStatus(false, 'Offline');
+      $('#backendTestResult').textContent = '❌ Cannot connect: ' + e.message;
+      $('#backendStatus').innerHTML = '❌';
+    }
+  }
+  // Upload handling
+  async function handleFiles(event) {
+    let files = Array.from(event.target.files);
+    for (let f of files) await uploadFileToBackend(f);
+    event.target.value = '';
+  }
+  async function handleDrop(event) {
+    event.preventDefault();
+    event.currentTarget.classList.remove('dragover');
+    let files = Array.from(event.dataTransfer.files);
+    for (let f of files) await uploadFileToBackend(f);
+  }
+  async function uploadFileToBackend(file) {
+    let queueDiv = $('#uploadQueue');
+    let id = 'up_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+    let entry = document.createElement('div');
+    entry.className = 'file-row';
+    entry.id = id;
+    entry.innerHTML = `<span>⏳</span><div style="flex:1">${escapeHtml(file.name)}</div><span class="dim">uploading...</span>`;
+    queueDiv.prepend(entry);
+
+    let formData = new FormData();
+    formData.append('files', file, file.name);
+    try {
+      let response = await fetch(BACKEND_URL + '/upload', {
+        method: 'POST',
+        body: formData
+      });
+      let result = await response.json();
+      if (result.success) {
+        entry.innerHTML = `<span>✅</span><div style="flex:1">${escapeHtml(file.name)}</div><span><a href="${result.viewUrl}" target="_blank">view</a></span>`;
+        // Also store locally for quick access
+        let text = await file.text();
+        fileStorage[file.name] = text;
+        saveLocalFiles();
+        uploadCount++;
+        $('#widgetUploads').textContent = uploadCount;
+        toast(`Uploaded ${file.name}`);
+      } else {
+        entry.innerHTML = `<span>❌</span><div style="flex:1">${escapeHtml(file.name)}</div><span class="dim">${result.error || 'failed'}</span>`;
+      }
+    } catch (err) {
+      entry.innerHTML = `<span>❌</span><div style="flex:1">${escapeHtml(file.name)}</div><span class="dim">${err.message}</span>`;
+    }
+    refreshFilesList();
+  }
+
+  // App navigation
+  let currentApp = null;
+  function openApp(appId) {
+    if (currentApp) $(`win-${currentApp}`)?.classList.remove('active');
+    let win = $(`win-${appId}`);
+    if (win) {
+      win.classList.add('active');
+      currentApp = appId;
+      if (appId === 'files') refreshFilesList();
+      if (appId === 'settings') {
+        $('#backendUrlInput').value = BACKEND_URL;
+        testBackend();
+      }
+      updateDock(appId);
+    } else {
+      toast('App not found: ' + appId);
+    }
+  }
+  function closeApp(appId) {
+    $(`win-${appId}`)?.classList.remove('active');
+    currentApp = null;
+    updateDock(null);
+  }
+  function updateDock(activeId) {
+    document.querySelectorAll('.dock-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.app === activeId);
+    });
+  }
+
+  // Built-in apps (minimal)
+  const builtinApps = {
+    settings: { name: 'Settings', icon: '⚙️', desc: 'Backend config' },
+    files: { name: 'Files', icon: '📁', desc: 'Local file storage' },
+    upload: { name: 'Upload', icon: '📤', desc: 'Send to backend' }
+  };
+  function renderHome() {
+    let grid = $('#appGrid');
+    let dock = $('#dock');
+    grid.innerHTML = '';
+    dock.innerHTML = '';
+    for (let [id, app] of Object.entries(builtinApps)) {
+      let iconDiv = document.createElement('div');
+      iconDiv.className = 'app-icon';
+      iconDiv.dataset.app = id;
+      iconDiv.innerHTML = `<div class="app-icon-img">${app.icon}</div><div class="app-icon-label">${app.name}</div>`;
+      iconDiv.onclick = () => openApp(id);
+      grid.appendChild(iconDiv);
+      // add to dock if useful
+      let dockBtn = document.createElement('div');
+      dockBtn.className = 'dock-btn';
+      dockBtn.dataset.app = id;
+      dockBtn.textContent = app.icon;
+      dockBtn.title = app.name;
+      dockBtn.onclick = () => openApp(id);
+      dock.appendChild(dockBtn);
+    }
+  }
+  function escapeHtml(str) { return String(str).replace(/[&<>]/g, function(m) { if (m === '&') return '&amp;'; if (m === '<') return '&lt;'; if (m === '>') return '&gt;'; return m; }); }
+  function escapeAttr(str) { return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+
+  // Initialization
+  function init() {
+    renderHome();
+    $('#widgetFiles').textContent = Object.keys(fileStorage).length;
+    $('#backendUrlInput').value = BACKEND_URL;
+    setStatus(false, 'Ready');
+    updateClock();
+    setInterval(updateClock, 60000);
+    testBackend(); // optional
+  }
+  init();
+</script>
+</body>
+</html>
